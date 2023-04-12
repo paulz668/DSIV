@@ -1,12 +1,11 @@
 library(tidyverse)
 library(lubridate)
-library(recommenderlab)
 library(naivebayes)
 
-setwd('C:/Users/paulz/Documents/UNI/BBE/6. Semester/DS IV/DSIV') #first we set our work directory
+# set work directory
+setwd('C:/Users/paulz/Documents/UNI/BBE/6. Semester/DS IV/DSIV') 
 
-#import the u.data dataset from MovieLens manually as it a .data file and i have no idea
-#how to import that
+# clean the data
 # dont forget to cite this paper for movielens dataset: 
 # F. Maxwell Harper and Joseph A. Konstan. 2015. The MovieLens Datasets:
 # History and Context. ACM Transactions on Interactive Intelligent
@@ -28,6 +27,45 @@ upper_bound <- 650
 ml_data_trunc <- ml_data_trunc %>% group_by(user_id) %>% filter(n() > lower_bound)
 ml_data_trunc <- ml_data_trunc %>% filter(n() < upper_bound)
 
+
+#implement UBCF and IBCF to get predictions for specific user-item pairs
+UBCF <- function(data, user_id, item_id, k = 50){
+  # returns a prediction for a user item pair using UBCF
+  # data needs to be a list with 3 columns named user_id, item_id and rating
+  # these columns all need to have entries of type integer
+  
+  # try to coerce user_id, item_id and k to integers
+  user_id <- as.integer(user_id)
+  item_id <- as.integer(item_id)
+  k <- as.integer(k)
+  
+  # check if the input arguments are valid
+  m <- match.arg(colnames(data), c('user_id', 'item_id', 'rating'), several.ok = TRUE)
+  stopifnot("Columnnames are not fully matching  c('user_id', 'item_id', 'rating')" = length(m) == 3)
+  t <- match.arg(sapply(ml_data_trunc, typeof), c('integer', 'integer', 'integer'), several.ok = TRUE)
+  stopifnot("Columntypes are not fully matching  c('integer', 'integer', 'integer')" = length(t) == 3)
+  stopifnot("user_id argument is not of type 'integer'" = typeof(user_id) == 'integer')
+  stopifnot("item_id argument is not of type 'integer'" = typeof(item_id) == 'integer')
+  stopifnot("k argument is not of type 'integer'" = typeof(k) == 'integer')
+  
+  # format data and find relevant users
+  data_matrix <- xtabs(rating ~ user_id + item_id, data = ml_data_trunc)
+  relevant_users <- which(data_matrix[, item_id]>0)
+  
+  #find similarities and filter out the k most similar users
+  similarities <- cor(t(data_matrix))[user_id, relevant_users]
+  similarities_ordered <- (similarities[order(similarities,decreasing= T)])[1:k]
+  k_relevant_users <- names(similarities_ordered)
+  
+  # weight the ratings of the k most similar users
+  relevant_ratings <- data_matrix[k_relevant_users, item_id]
+  relevant_means <- rowMeans(data_matrix[k_relevant_users,])
+  prediction <- mean(data_matrix[user_id,]) + (similarities_ordered %*% (relevant_ratings - relevant_means))/sum(abs(similarities_ordered))
+  
+  return(prediction)
+}
+
+
 #implement ProfileMAE algorithm
 ProfileError <- function(data, error = c('MAE', 'MSE'), prediction = c('UBCF', 'IBCF', 'Naive_Bayes'){
   # data needs to be a list with 4 columns and the columnnames user_id, item_id, rating and timestamp
@@ -42,6 +80,8 @@ ProfileError <- function(data, error = c('MAE', 'MSE'), prediction = c('UBCF', '
   stopifnot("Input data with incorrect column numbers: need 4" = ncol(data) == 4)
   m <- match.arg(colnames(data), c('user_id', 'item_id', 'rating', 'timestamp'), several.ok = TRUE)
   stopifnot("Columnnames are not fully matching  c('user_id', 'item_id', 'rating', 'timestamp')" = length(m) == 4)
+  t <- match.arg(sapply(ml_data_trunc, typeof), c('integer', 'integer', 'integer', 'double'), several.ok = TRUE)
+  stopifnot("Columntypes are not fully matching  c('integer', 'integer', 'integer', 'double')" = length(t) == 4)
   match.arg(error)
   match.arg(prediction)
 
@@ -57,15 +97,12 @@ ProfileError <- function(data, error = c('MAE', 'MSE'), prediction = c('UBCF', '
     for (j in 1:length(pull(ps$user_id))) {
       e <- ps[j,]
 
-      data_j <- as(as.matrix(data[data$timestamp < e$timestamp,][,1:3]), 'realRatingMatrix')
+      data_j <- data[data$timestamp < e$timestamp,][,1:3]
       if(prediction == 'UBCF'){
-        rec <- Recommender(data_j, method = "UBCF")
-        #q <- insert prediction here
+        q <- UBCF(data_j, u, e$item_id)
       }if(prediction == 'IBCF'){
-        rec <- Recommender(data_j, method = "IBCF")
         #q <- insert prediction here
       }else{
-        #rec <- insert naive bayes recommender
         #q <- insert prediction here
       }
 
@@ -94,12 +131,7 @@ ProfileError <- function(data, error = c('MAE', 'MSE'), prediction = c('UBCF', '
   return(res)
 }
 
-
-# data <- ml_data_trunc[1:1000,]
-# p <- data[data$user_id == 196,]
-# 
-# ps <- p[order(p$timestamp),]
-# e <- ps[1,]
-# data_j <- as(as.matrix(data[data$timestamp < e$timestamp,][,1:3]), 'realRatingMatrix')
-# rec <- Recommender(data_j, method = "UBCF")
-# q <- 
+bayes_data <- ml_data_trunc
+bayes_data$user_id <- as.factor(bayes_data$user_id)
+bayes_data$item_id <- as.factor(bayes_data$item_id)
+bayes_data$rating <- as.factor(bayes_data$rating) 
