@@ -75,10 +75,37 @@ UBCF <- function(data, user_id, item_id, k = 50){
   relevant_ratings <- data_matrix[k_relevant_users, as.character(item_id)]
   prediction <- mean(data_matrix[as.character(user_id),]) + (similarities_ordered %*% (relevant_ratings - relevant_means))/sum(abs(similarities_ordered))
   
-  return(prediction)
+  if(prediction < 0){
+    return(0)
+  }
+  else{return(prediction)}
 }
 
 
+adjusted_cosine_similarity <- function(data_matrix, item_id) {
+  # Calculate the mean ratings for each user
+  user_means <- rowMeans(data_matrix, na.rm = TRUE)
+  
+  # Center the ratings for each item by subtracting the mean rating for each user
+  centered_data_mat <- t(scale(t(data_matrix), scale = FALSE))
+  
+  # Compute the adjusted cosine similarity between item_id and every other item
+  similarities <- numeric(length = ncol(data_matrix))
+  for (i in 1:ncol(data_matrix)) {
+    if (i != item_id) {
+      numerator <- sum(centered_data_mat[, as.character(item_id)] * centered_data_mat[, i], na.rm = TRUE)
+      denominator <- sqrt(sum(centered_data_mat[, as.character(item_id)]^2, na.rm = TRUE)) * sqrt(sum(centered_data_mat[, i]^2, na.rm = TRUE))
+      similarities[i] <- numerator / denominator
+    }
+    else{
+      similarities[i] <- 1
+    }
+  }
+  
+  # Return the similarities
+  names(similarities) <- colnames(data_matrix)
+  return(similarities)
+}
 
 IBCF <- function(data, user_id, item_id, k = 50){
   # returns a prediction for a user item pair using IBCF
@@ -101,12 +128,31 @@ IBCF <- function(data, user_id, item_id, k = 50){
   
   # format data and find relevant items
   data_matrix <- xtabs(rating ~ user_id + item_id, data = data)
-  relevant_items <- which(data_matrix[user_id, ]>0)
+  relevant_items <- names(which(data_matrix[as.character(user_id), ]>0))
   
   # find similarities and filter out k most similar items
-  similarities <- c()
+  if(length(relevant_items) > 0){
+    similarities <- adjusted_cosine_similarity(data_matrix, item_id)[relevant_items]
+  }
+  else{return(sum(data_matrix[,as.character(item_id)][data_matrix[,as.character(item_id)] > 0]) / length(data_matrix[,as.character(item_id)][data_matrix[,as.character(item_id)] > 0]))}
+  if(length(similarities) < k){
+    similarities_ordered <- (similarities[order(similarities,decreasing= T)])[1:length(similarities)]
+  }
+  else{similarities_ordered <- (similarities[order(similarities,decreasing= T)])[1:k]}
   
+  if(length(similarities) > 1){
+    k_relevant_items <- names(similarities_ordered)
+  }
+  else{
+    k_relevant_items <- relevant_items
+  }
   
+  prediction <- sum(similarities_ordered * data_matrix[as.character(user_id), k_relevant_items]) / sum(abs(similarities_ordered))
+  
+  if(prediction < 0){
+    return(0)
+  }
+  else{return(prediction)}
 }
 
 
@@ -157,10 +203,9 @@ ProfileError <- function(data, error = c('MAE', 'MSE'), prediction = c('UBCF', '
           q <- UBCF(data_j, u, e$item_id)
         }
         if(prediction == 'IBCF'){
-          #q <- insert prediction here
-          q <- 0
+          q <- IBCF(data_j, u, e$item_id)
         }
-        else{
+        if(prediction == 'Naive_Bayes'){
           #q <- insert prediction here
           q <- 0
         } 
